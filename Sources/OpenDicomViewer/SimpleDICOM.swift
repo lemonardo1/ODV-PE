@@ -150,6 +150,10 @@ class SimpleDicomParser {
                 peekG = isLittleEndian ? peekG.littleEndian : peekG.bigEndian
                 peekE = isLittleEndian ? peekE.littleEndian : peekE.bigEndian
                 if peekG == 0x7FE0 && peekE == 0x0010 {
+                    // Record a zero-length placeholder so callers can see the pixel data tag
+                    // was encountered without us having read its (potentially huge) bytes.
+                    let pixelTag = DicomTag(group: 0x7FE0, element: 0x0010)
+                    elements.append(DicomElement(tag: pixelTag, vr: .OW, length: 0, data: Data()))
                     return (elements, nil, transferSyntaxUID)
                 }
             }
