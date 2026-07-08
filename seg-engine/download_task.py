@@ -45,34 +45,38 @@ def main(argv: list[str]) -> int:
         log(f"ERROR: unknown task '{args.task}'. Known: {', '.join(KNOWN_TASKS)}")
         return 2
 
-    try:
-        # TotalSegmentator ships a downloader that fetches only the weights for a task.
-        from totalsegmentator.download_pretrained_weights import (
-            download_pretrained_weights as _download,
-        )
-        from totalsegmentator.map_to_binary import class_map_5_parts  # noqa: F401
+    import importlib.util
+    import shutil
+    import subprocess
+    from pathlib import Path
 
-        log(f"Downloading weights for task '{args.task}'…")
-        # The CLI 'totalseg_download_weights -t <task>' wraps this; call it directly.
-        from totalsegmentator.config import setup_totalseg  # noqa: F401
-        import subprocess
-
-        # Prefer the official CLI entry point for correct task->weight mapping.
-        rc = subprocess.call(
-            [sys.executable, "-m", "totalsegmentator.bin.totalseg_download_weights",
-             "-t", args.task]
-        )
-        if rc != 0:
-            log(f"ERROR: weight download exited with code {rc}")
-            return rc
-        log(f"Weights for '{args.task}' are ready.")
-        return 0
-    except ImportError as e:
-        log(f"ERROR: TotalSegmentator not installed in this environment: {e}")
+    if importlib.util.find_spec("totalsegmentator") is None:
+        log("ERROR: TotalSegmentator is not installed in this environment. "
+            "Run: pip install -r requirements.txt")
         return 1
+
+    # Use the official console script (stable across versions) rather than
+    # importing internal modules, whose paths change between releases.
+    exe = shutil.which("totalseg_download_weights")
+    if exe is None:
+        candidate = Path(sys.executable).with_name("totalseg_download_weights")
+        exe = str(candidate) if candidate.exists() else None
+    if exe is None:
+        log("ERROR: 'totalseg_download_weights' console script not found next to "
+            f"{sys.executable}. Is TotalSegmentator installed in this venv?")
+        return 1
+
+    log(f"Downloading weights for task '{args.task}'… (weights only; no patient data)")
+    try:
+        rc = subprocess.call([exe, "-t", args.task])
     except Exception as e:  # noqa: BLE001
         log(f"ERROR: {type(e).__name__}: {e}")
         return 1
+    if rc != 0:
+        log(f"ERROR: weight download exited with code {rc}")
+        return rc
+    log(f"Weights for '{args.task}' are ready.")
+    return 0
 
 
 if __name__ == "__main__":
