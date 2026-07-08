@@ -67,14 +67,22 @@
 - [x] 출력 `<out>/metrics.json` (+ `segmentation.dcm`), 경로 기반 전송, graceful error → metrics.json `error` 필드
 - [x] CLI 스모크: `--help`/`--list`/잘못된 경로 처리 확인 (heavy dep 없이)
 
-### 1.3 검증 (Phase 1.5로 이관 — 사용자 환경 필요)
-> `rvlv.py` 핵심 로직은 검증됨. 전체 파이프라인 실행은 torch+TotalSegmentator(~3GB) 설치 + CT 데이터가 필요해 이 세션에서 불가.
-> ⚠️ **`heartchambers_highres`는 라이선스 게이트**: 무료 학술 라이선스 번호를 먼저 등록해야 함(없으면 `KeyError: 'license_number'`).
-- [x] (사용자 환경) `pip install -r seg-engine/requirements.txt` 완료 (TotalSegmentator 2.15.0, torch 2.12.1)
-- [ ] (사용자 환경) 무료 학술 라이선스 발급 → `totalseg_set_license -l aca_XXXX` → `download_task.py --task heartchambers_highres`
-- [ ] (사용자 환경) CLI로 케이스 1개 실행 → `segmentation.dcm` + `metrics.json` 산출
-- [ ] (사용자 환경) SEG 파일을 뷰어에 로드 → RV/LV 마스크 오버레이 육안 확인
-- [ ] length vs volume 결과 비교 (수 케이스)
+### 1.3 파이프라인 검증 ✅ (실데이터로 end-to-end 확인)
+> 공개 조영 흉부 CT(TCIA NSCLC-Radiomics LUNG1-001, 134슬라이스)로 전체 파이프라인 실행 검증 완료.
+- [x] `pip install -r seg-engine/requirements.txt` (TotalSegmentator 2.15.0, torch 2.12.1, Python 3.14)
+- [x] 무료 학술 라이선스 발급·등록(`totalseg_set_license`) → `download_task.py`로 Task 301 가중치(230MB) 다운로드
+- [x] `run_segment.py` 실행: heartchambers_highres → 심실 마스크 → RV/LV=1.12 (RV 44.6mm / LV 39.8mm) → `metrics.json` + `segmentation.dcm`(binary SEG, 512×512, RV/LV 2세그먼트, 소스 134인스턴스 참조)
+- [x] **뷰어 파서 roundtrip**: `DICOMAnnotationObjectParser`가 생성 SEG를 정확히 파싱(48 프레임, 72,831 픽셀 일치) → 뷰어 렌더 경로 확정
+- [x] 파일명/방향/SEG 슬라이스 대응 가정 모두 실측 확인
+- [x] 실측 타이밍: nnU-Net **MPS 미사용, CPU ~2–3분/케이스** → "스터디는 오프라인 사전계산" 권고 확증
+- [ ] length vs volume 결과 비교 (수 케이스) — 선택
+- 재현: `seg-engine/tests/fetch_sample_ct.sh`로 동일 샘플 CT 다운로드 가능
+
+### 1.5 임상 정확도 검증 (실제 PE/CTPA 코호트 필요 — 다음 단계)
+> 파이프라인 mechanics는 검증됨. 남은 것은 "CTPA에서 RV/LV가 임상적으로 맞느냐".
+- [ ] 실제 PE/CTPA 케이스(예: FUMPE, RSNA-STR-PE 등 공개셋)로 실행
+- [ ] 조영기(폐동맥기) 챔버 분할 정확도 육안 검수
+- [ ] 자동 RV/LV vs 수동 측정 비교
 
 ---
 
