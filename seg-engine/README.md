@@ -19,6 +19,14 @@ series never leaves the machine. Runs once per study and exits (no resident mode
 ```bash
 # one-time, into the dedicated engine venv
 pip install -r requirements.txt
+
+# heartchambers_highres is license-gated (FREE for academic/non-commercial use).
+# Without it you get `KeyError: 'license_number'` from TotalSegmentator.
+#   1) request a license: https://backend.totalsegmentator.com/license-academic/
+#      (or the form at https://totalsegmentator.com)
+#   2) register once:
+totalseg_set_license -l aca_XXXXXXXXXXXX
+#   3) download the task weights:
 python3 download_task.py --task heartchambers_highres
 
 # per study

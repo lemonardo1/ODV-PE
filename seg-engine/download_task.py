@@ -22,6 +22,10 @@ KNOWN_TASKS = {
     "lung_vessels": "Lung vessels and airways",
 }
 
+# Subtasks gated behind a (free, academic) TotalSegmentator license number.
+# Registered once via `totalseg_set_license -l <license>`.
+LICENSE_REQUIRED_TASKS = {"heartchambers_highres", "lung_vessels"}
+
 
 def log(msg: str) -> None:
     print(msg, flush=True)
@@ -74,6 +78,15 @@ def main(argv: list[str]) -> int:
         return 1
     if rc != 0:
         log(f"ERROR: weight download exited with code {rc}")
+        if args.task in LICENSE_REQUIRED_TASKS:
+            log("")
+            log(f"'{args.task}' is a license-protected TotalSegmentator model.")
+            log("It is FREE for non-commercial / academic use, but needs a one-time")
+            log("license number:")
+            log("  1) Request one: https://backend.totalsegmentator.com/license-academic/")
+            log("     (or the form linked from https://totalsegmentator.com)")
+            log("  2) Register it:  totalseg_set_license -l aca_XXXXXXXXXXXX")
+            log("  3) Re-run this download.")
         return rc
     log(f"Weights for '{args.task}' are ready.")
     return 0

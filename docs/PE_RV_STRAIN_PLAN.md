@@ -69,7 +69,9 @@
 
 ### 1.3 검증 (Phase 1.5로 이관 — 사용자 환경 필요)
 > `rvlv.py` 핵심 로직은 검증됨. 전체 파이프라인 실행은 torch+TotalSegmentator(~3GB) 설치 + CT 데이터가 필요해 이 세션에서 불가.
-- [ ] (사용자 환경) `pip install -r seg-engine/requirements.txt` + `download_task.py --task heartchambers_highres`
+> ⚠️ **`heartchambers_highres`는 라이선스 게이트**: 무료 학술 라이선스 번호를 먼저 등록해야 함(없으면 `KeyError: 'license_number'`).
+- [x] (사용자 환경) `pip install -r seg-engine/requirements.txt` 완료 (TotalSegmentator 2.15.0, torch 2.12.1)
+- [ ] (사용자 환경) 무료 학술 라이선스 발급 → `totalseg_set_license -l aca_XXXX` → `download_task.py --task heartchambers_highres`
 - [ ] (사용자 환경) CLI로 케이스 1개 실행 → `segmentation.dcm` + `metrics.json` 산출
 - [ ] (사용자 환경) SEG 파일을 뷰어에 로드 → RV/LV 마스크 오버레이 육안 확인
 - [ ] length vs volume 결과 비교 (수 케이스)
@@ -167,7 +169,7 @@
 ## 상시 주의 / 결정 항목
 
 - [ ] **RAM**: Gemma 상주 + seg 실행 동시 겹침 최소화 (one-shot + 실행 전 서버 pause 옵션)
-- [ ] **라이선스**: TotalSegmentator 가중치 = 비상업/연구용. 상용화 시 재라이선싱 필요. UI에 배지 표기
+- [ ] **라이선스**: `heartchambers_highres`·`lung_vessels` 등은 **무료 학술 라이선스 번호 필수**(`totalseg_set_license -l aca_XXXX`, 없으면 `KeyError: 'license_number'`). 비상업/연구용이며 상용화 시 재라이선싱 필요. → **Phase 2 플러그인 스토어는 게이트 태스크에 라이선스 입력 단계/배지 UI 필요**
 - [ ] **네트워크**: 가중치 다운로드만 egress (환자 데이터 아님). 문구로 명시
 - [ ] **규제 포지션**: "decision support", "NOT diagnosis" 유지. 매니페스트는 로컬 고정(원격 코드 실행 금지)
 - [ ] **스터디 우선**: 스토어를 과도하게 만들다 과학 일정 늦추지 말 것. 태스크 1개(heartchambers)로 출시 가능
