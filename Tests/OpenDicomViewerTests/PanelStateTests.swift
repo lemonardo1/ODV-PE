@@ -83,7 +83,7 @@ final class PanelStateTests: XCTestCase {
 
     func testActiveToolAllCases() {
         let cases = ActiveTool.allCases
-        XCTAssertEqual(cases.count, 9)
+        XCTAssertEqual(cases.count, 10)
     }
 
     func testActiveToolRawValues() {
@@ -96,6 +96,7 @@ final class PanelStateTests: XCTestCase {
         XCTAssertEqual(ActiveTool.ruler.rawValue, "Ruler")
         XCTAssertEqual(ActiveTool.angle.rawValue, "Angle")
         XCTAssertEqual(ActiveTool.eraser.rawValue, "Eraser")
+        XCTAssertEqual(ActiveTool.aiAnalyze.rawValue, "AI Analyze")
     }
 
     func testActiveToolIcons() {

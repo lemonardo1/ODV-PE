@@ -37,6 +37,7 @@ struct ContentView: View {
                 // Fixed tool palette column
                 ToolPalette(model: model)
                     .padding(.vertical, 8)
+                    .fixedSize(horizontal: true, vertical: false)
 
                 // Main viewer area
                 ZStack(alignment: .topLeading) {
@@ -69,9 +70,43 @@ struct ContentView: View {
 
                             Spacer()
 
-                            // Layout toolbar + Tag toggle
+                            // Layout toolbar + AI toggle + Tag toggle
                             HStack(spacing: 8) {
                                 LayoutToolbar(model: model)
+
+                                Button(action: {
+                                    model.showAIInspector.toggle()
+                                    if model.showAIInspector {
+                                        if let panel = model.activePanel,
+                                           panel.aiDescription == nil && !panel.aiAnalysisInProgress {
+                                            panel.showAIAnnotations = true
+                                            model.triggerAIAnalysis(for: panel)
+                                        }
+                                    }
+                                }) {
+                                    ZStack(alignment: .topTrailing) {
+                                        ZStack(alignment: .bottomTrailing) {
+                                            Image(systemName: "brain")
+                                                .font(.system(size: 16))
+                                                .foregroundStyle(model.showAIInspector ? .white : .secondary)
+                                                .padding(8)
+
+                                            Text("G")
+                                                .font(.system(size: 8, weight: .semibold, design: .rounded))
+                                                .foregroundStyle(.secondary)
+                                                .offset(x: -2, y: -2)
+                                        }
+
+                                        Circle()
+                                            .fill(AIService.shared.serverStatus.color)
+                                            .frame(width: 6, height: 6)
+                                            .offset(x: -2, y: 2)
+                                    }
+                                    .background(.ultraThinMaterial)
+                                    .cornerRadius(8)
+                                }
+                                .buttonStyle(.plain)
+                                .help("Toggle AI Inspector (G)")
 
                                 Button(action: { model.showTags.toggle() }) {
                                     ZStack(alignment: .bottomTrailing) {
@@ -167,6 +202,17 @@ struct ContentView: View {
                 }
             }
 
+            // ⌘G = Reanalyse with AI
+            if press.modifiers == .command && press.characters.lowercased() == "g" {
+                if let panel = model.activePanel {
+                    panel.clearAIAnnotations()
+                    panel.showAIAnnotations = true
+                    model.showAIInspector = true
+                    model.triggerAIAnalysis(for: panel)
+                }
+                return .handled
+            }
+
             // Escape = Clear group selection
             if press.key == .escape {
                 if model.groupSelectedPanels.count > 0 {
@@ -177,16 +223,27 @@ struct ContentView: View {
 
             return .ignored
         }
-        .inspector(isPresented: $model.showTags) {
+        .inspector(isPresented: Binding(
+            get: { model.activeInspector != nil },
+            set: { if !$0 { model.activeInspector = nil } }
+        )) {
             Group {
-                let activeTags = model.selectedDerivedObjectID == nil ? (model.activePanel?.tags ?? []) : model.tags
-                if activeTags.isEmpty {
-                    ContentUnavailableView("No Tags", systemImage: "tag.slash")
-                } else {
-                    TagView(tags: activeTags)
+                switch model.activeInspector {
+                case .tags:
+                    // Show the selected derived object's tags, or the active panel's tags
+                    let activeTags = model.selectedDerivedObjectID == nil ? (model.activePanel?.tags ?? []) : model.tags
+                    if activeTags.isEmpty {
+                        ContentUnavailableView("No Tags", systemImage: "tag.slash")
+                    } else {
+                        TagView(tags: activeTags)
+                    }
+                case .ai:
+                    AIInspectorView(model: model)
+                case nil:
+                    EmptyView()
                 }
             }
-            .id(model.selectedDerivedObjectID?.absoluteString ?? model.activePanelID.uuidString)
+            .id("\(model.selectedDerivedObjectID?.absoluteString ?? model.activePanelID.uuidString)-\(String(describing: model.activeInspector))")
         }
         .sheet(isPresented: $model.showHelp) {
             HelpView()

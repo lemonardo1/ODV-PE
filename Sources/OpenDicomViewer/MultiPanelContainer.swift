@@ -201,16 +201,42 @@ struct PanelView: View {
                     .zIndex(12)
             }
 
-            // Selected DICOM-derived annotation overlay (GSPS, RTSTRUCT)
+            // Selected DICOM-derived annotation overlay (GSPS, RTSTRUCT, SEG)
             if panel.image != nil && !panel.importedOverlays.isEmpty {
                 ImportedDICOMOverlay(panel: panel)
                     .zIndex(12.5)
             }
 
-            // Annotation overlay (rulers, angles, ROI stats)
+            // Annotation overlay (rulers, angles, ROI stats, AI annotations)
             if panel.image != nil {
                 AnnotationOverlay(panel: panel)
                     .zIndex(13)
+            }
+
+            // AI analysis in-progress indicator (compact, top-right)
+            if panel.aiAnalysisInProgress {
+                VStack {
+                    HStack {
+                        Spacer()
+                        HStack(spacing: 6) {
+                            ProgressView()
+                                .scaleEffect(0.6)
+                                .tint(.yellow)
+                            Text("AI Analyzing...")
+                                .font(.system(.caption2, design: .rounded))
+                                .foregroundStyle(.yellow)
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.black.opacity(0.7))
+                        .cornerRadius(6)
+                        .padding(.top, 8)
+                        .padding(.trailing, 52)
+                    }
+                    Spacer()
+                }
+                .allowsHitTesting(false)
+                .zIndex(14)
             }
 
             // Orientation labels (A/P/R/L/S/I)
@@ -678,6 +704,8 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 desiredCursor = .crosshair
             case .eraser:
                 desiredCursor = .disappearingItem
+            case .aiAnalyze:
+                desiredCursor = .crosshair
             }
 
             if tool == .select {
@@ -873,6 +901,10 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                         panel.annotations.remove(at: idx)
                     }
                 }
+
+            case .aiAnalyze:
+                // AI analyze triggered by clicking on image
+                model.triggerAIAnalysis(for: panel)
             }
         }
 
@@ -890,6 +922,16 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 let closest = CGPoint(
                     x: max(rect.minX, min(point.x, rect.maxX)),
                     y: max(rect.minY, min(point.y, rect.maxY))
+                )
+                return hypot(point.x - closest.x, point.y - closest.y)
+            case .aiStructure(let rect, _, _), .aiFinding(let rect, _, _), .aiROILabel(let rect, _, _, _):
+                let imgW = max(1, panel?.displayImageWidth ?? 1)
+                let imgH = max(1, panel?.displayImageHeight ?? 1)
+                let pixelRect = CGRect(x: rect.origin.x * imgW, y: rect.origin.y * imgH,
+                                       width: rect.width * imgW, height: rect.height * imgH)
+                let closest = CGPoint(
+                    x: max(pixelRect.minX, min(point.x, pixelRect.maxX)),
+                    y: max(pixelRect.minY, min(point.y, pixelRect.maxY))
                 )
                 return hypot(point.x - closest.x, point.y - closest.y)
             }
@@ -1151,6 +1193,9 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 }
 
             case .eraser:
+                break
+
+            case .aiAnalyze:
                 break
             }
         }
@@ -1997,6 +2042,548 @@ struct ImportedDICOMOverlay: View {
     }
 }
 
+// MARK: - AI Inspector View
+
+struct AIInspectorView: View {
+    @ObservedObject var model: DICOMModel
+    @ObservedObject private var aiService = AIService.shared
+    @ObservedObject private var aiServerManager = AIServerManager.shared
+    @State private var dotCount: Int = 0
+
+    private let timer = Timer.publish(every: 0.4, on: .main, in: .common).autoconnect()
+
+    private var panel: PanelState? { model.activePanel }
+
+    private var aiAnnotations: [Annotation] {
+        panel?.annotations.filter { $0.isAI } ?? []
+    }
+
+    private var statusText: String {
+        switch aiServerManager.setupState {
+        case .notSetup:    return "Setup required"
+        case .installingDeps: return "Setting up…"
+        case .failed:      return "Setup failed"
+        default: break
+        }
+        if panel?.aiAnalysisInProgress == true { return "Analyzing…" }
+        return aiService.serverStatus.displayText
+    }
+
+    private var statusColor: Color {
+        switch aiServerManager.setupState {
+        case .notSetup:       return .orange
+        case .installingDeps: return .yellow
+        case .failed:         return .red
+        default: break
+        }
+        return aiService.serverStatus.color
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            // Header — always visible
+            HStack {
+                HStack(spacing: 4) {
+                    Image(systemName: "brain")
+                        .foregroundStyle(.yellow)
+                    Text("AI Analysis")
+                        .font(.headline)
+                }
+                Spacer()
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(statusColor)
+                        .frame(width: 6, height: 6)
+                    Text(statusText)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+
+            // Mode picker — only when server is ready
+            if !aiService.availableModes.isEmpty && aiService.serverStatus.isReady {
+                Picker("Mode", selection: $aiService.selectedMode) {
+                    ForEach(aiService.availableModes) { mode in
+                        Text(mode.label).tag(mode.key)
+                    }
+                }
+                .pickerStyle(.menu)
+                .controlSize(.small)
+                .padding(.horizontal)
+                .padding(.bottom, 6)
+            }
+
+            Divider()
+
+            // Main content — driven by setup state first, then server/panel state
+            Group {
+                switch aiServerManager.setupState {
+                case .notSetup:
+                    AISetupRequiredView()
+                case .installingDeps:
+                    AIInstallingView(log: aiServerManager.setupLog)
+                case .failed(let msg):
+                    AISetupFailedView(message: msg)
+                default:
+                    if !aiService.serverStatus.isReady && !aiServerManager.isServerRunning {
+                        AIServerStoppedView(isFirstRun: aiServerManager.isFirstRun)
+                    } else {
+                        panelContent
+                    }
+                }
+            }
+
+            Divider()
+
+            // Bottom action bar — only shown when server is active
+            if aiService.serverStatus.isReady || aiServerManager.isServerRunning {
+                HStack {
+                    Button(action: {
+                        if let panel = panel {
+                            panel.clearAIAnnotations()
+                            model.triggerAIAnalysis(for: panel)
+                        }
+                    }) {
+                        Label("Reanalyze", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(panel?.image == nil || panel?.aiAnalysisInProgress == true || !aiService.serverStatus.isReady)
+                    .help("⌘G")
+
+                    Spacer()
+
+                    Button(action: {
+                        panel?.clearAIAnnotations()
+                        model.objectWillChange.send()
+                    }) {
+                        Label("Clear", systemImage: "trash")
+                            .font(.caption)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(aiAnnotations.isEmpty && panel?.aiDescription == nil)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 8)
+            }
+        }
+    }
+
+    // MARK: - Panel Content (when server is running)
+
+    @ViewBuilder
+    private var panelContent: some View {
+        if let panel = panel {
+            if panel.aiAnalysisInProgress {
+                VStack(spacing: 12) {
+                    ProgressView()
+                        .tint(.yellow)
+                    Text("Analyzing" + String(repeating: ".", count: dotCount))
+                        .font(.system(.body, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                        .onReceive(timer) { _ in dotCount = (dotCount % 3) + 1 }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if let error = panel.aiError {
+                VStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle")
+                        .font(.title2)
+                        .foregroundStyle(.red)
+                    Text(error)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .multilineTextAlignment(.center)
+                    Button("Retry") {
+                        panel.clearAIAnnotations()
+                        model.triggerAIAnalysis(for: panel)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+                .padding()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if aiAnnotations.isEmpty && panel.aiDescription == nil {
+                // Server is starting/loading — may be downloading model on first run
+                if aiService.serverStatus == .starting || aiServerManager.isFirstRun {
+                    AIModelLoadingView()
+                } else {
+                    ContentUnavailableView {
+                        Label("No Analysis", systemImage: "brain")
+                    } description: {
+                        Text("Press G or ⌘G to analyze the current image")
+                    }
+                }
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 8) {
+                        if let desc = panel.aiDescription, !desc.isEmpty {
+                            Text(desc)
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.white)
+                                .padding(8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(Color.white.opacity(0.05))
+                                .cornerRadius(6)
+                        }
+                        if !aiAnnotations.isEmpty {
+                            Text("Findings")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .padding(.top, 4)
+                            ForEach(aiAnnotations) { annotation in
+                                AIAnnotationRow(
+                                    annotation: annotation,
+                                    isSelected: panel.selectedAnnotationID == annotation.id,
+                                    onTap: {
+                                        if panel.selectedAnnotationID == annotation.id {
+                                            panel.selectedAnnotationID = nil
+                                        } else {
+                                            panel.selectedAnnotationID = annotation.id
+                                        }
+                                        model.objectWillChange.send()
+                                    }
+                                )
+                            }
+                        }
+                    }
+                    .padding()
+                }
+            }
+        } else {
+            ContentUnavailableView("No Panel", systemImage: "rectangle.slash")
+        }
+    }
+}
+
+// MARK: - Setup State Sub-Views
+
+/// Shown when the Python venv has never been created.
+/// Auto-triggers setup on appear; the manual button is a fallback.
+private struct AISetupRequiredView: View {
+    @ObservedObject private var manager = AIServerManager.shared
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .tint(.yellow)
+                .scaleEffect(1.2)
+
+            VStack(spacing: 6) {
+                Text("Setting Up AI Engine…")
+                    .font(.headline)
+                Text("Installing Python packages and preparing the model environment. This runs once.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            VStack(spacing: 4) {
+                Label("~500 MB Python packages (mlx, mlx-vlm…)", systemImage: "arrow.down.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                Label("~4.5 GB model download on first launch", systemImage: "arrow.down.circle")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 4)
+
+            Button(action: { manager.setupEnvironment() }) {
+                Label("Set Up AI Engine", systemImage: "arrow.down.circle")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .tint(.yellow)
+            .opacity(0)  // Hidden — auto-setup already triggered on launch
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // Belt-and-suspenders: trigger setup if it hasn't started yet
+            if manager.setupState == .notSetup || manager.setupState == .unknown {
+                manager.setupEnvironment()
+            }
+        }
+    }
+}
+
+/// Shown while pip install is running
+private struct AIInstallingView: View {
+    let log: String
+    @State private var scrollProxy: ScrollViewProxy? = nil
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                ProgressView()
+                    .controlSize(.small)
+                    .tint(.yellow)
+                Text("Installing AI dependencies…")
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
+            }
+            .padding(.horizontal)
+            .padding(.top, 12)
+
+            Text("This runs once. Do not quit the app.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal)
+
+            ScrollViewReader { proxy in
+                ScrollView {
+                    Text(log.isEmpty ? " " : log)
+                        .font(.system(.caption2, design: .monospaced))
+                        .foregroundStyle(.green.opacity(0.85))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(8)
+                        .id("logBottom")
+                }
+                .background(Color.black.opacity(0.4))
+                .cornerRadius(6)
+                .padding(.horizontal)
+                .frame(maxHeight: .infinity)
+                .onChange(of: log) {
+                    withAnimation { proxy.scrollTo("logBottom", anchor: .bottom) }
+                }
+            }
+            .padding(.bottom, 12)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shown when setup failed
+private struct AISetupFailedView: View {
+    let message: String
+    @ObservedObject private var manager = AIServerManager.shared
+
+    var body: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 30))
+                .foregroundStyle(.red)
+
+            Text("Setup Failed")
+                .font(.headline)
+
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 8)
+
+            Button(action: { manager.retrySetup() }) {
+                Label("Retry Setup", systemImage: "arrow.clockwise")
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Shown when the venv is ready but the server process is not running.
+/// Auto-starts the server on appear if it was never manually stopped.
+private struct AIServerStoppedView: View {
+    let isFirstRun: Bool
+    @ObservedObject private var manager = AIServerManager.shared
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ProgressView()
+                .tint(.yellow)
+                .scaleEffect(1.2)
+
+            Text("Starting AI Server…")
+                .font(.headline)
+
+            if isFirstRun {
+                Text("First launch: downloading Gemma 4 (~4.5 GB) from Hugging Face.\nKeep the app open — this takes 10–30 minutes.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 8)
+            } else {
+                Text("Loading model into memory…")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+
+            Button(action: { manager.startServer() }) {
+                Label("Start AI Server", systemImage: "play.fill")
+                    .frame(maxWidth: .infinity)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.regular)
+            .tint(.yellow)
+            .opacity(0)  // Hidden — auto-start already triggered; shown only as fallback
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            // Auto-start if not already starting/running
+            if !manager.isServerRunning {
+                manager.startServer()
+            }
+        }
+    }
+}
+
+/// Shown while the server process is starting / loading the model
+private struct AIModelLoadingView: View {
+    @ObservedObject private var manager = AIServerManager.shared
+    @State private var dotCount = 0
+    private let timer = Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()
+
+    var body: some View {
+        VStack(spacing: 16) {
+            ProgressView()
+                .tint(.yellow)
+                .scaleEffect(1.2)
+
+            VStack(spacing: 6) {
+                Text("Loading AI Model" + String(repeating: ".", count: dotCount))
+                    .font(.subheadline)
+                    .onReceive(timer) { _ in dotCount = (dotCount % 3) + 1 }
+
+                if manager.isFirstRun {
+                    Text("First launch: downloading Gemma 4 E4B (~4.5 GB).\nThis may take 10–30 minutes.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                } else {
+                    Text("Model is loading into memory…")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(20)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - AI Annotation Row
+
+struct AIAnnotationRow: View {
+    let annotation: Annotation
+    let isSelected: Bool
+    let onTap: () -> Void
+
+    private var bgColor: Color {
+        isSelected ? Color.yellow.opacity(0.15) : Color.white.opacity(0.05)
+    }
+
+    private var borderColor: Color {
+        isSelected ? Color.yellow.opacity(0.5) : Color.clear
+    }
+
+    var body: some View {
+        Button(action: onTap) {
+            rowContent
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var rowContent: some View {
+        HStack(spacing: 8) {
+            RoundedRectangle(cornerRadius: 2)
+                .fill(annotationColor)
+                .frame(width: 4, height: 32)
+
+            labelSection
+
+            Spacer()
+
+            confidenceBadge
+        }
+        .padding(6)
+        .background(bgColor)
+        .cornerRadius(6)
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(borderColor, lineWidth: 1)
+        )
+    }
+
+    private var labelSection: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(annotationLabel)
+                .font(.system(.caption, weight: .semibold))
+                .foregroundStyle(.white)
+
+            if !annotationDetail.isEmpty {
+                Text(annotationDetail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var confidenceBadge: some View {
+        if !confidenceText.isEmpty {
+            Text(confidenceText)
+                .font(.caption2)
+                .foregroundStyle(annotationColor)
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(annotationColor.opacity(0.15))
+                .cornerRadius(4)
+        }
+    }
+
+    private var annotationColor: Color {
+        switch annotation.type {
+        case .aiStructure: return .yellow
+        case .aiFinding(_, _, let severity):
+            switch severity.lowercased() {
+            case "severe": return .red
+            case "moderate": return .orange
+            case "mild": return .yellow
+            default: return .green
+            }
+        case .aiROILabel: return .blue
+        default: return .gray
+        }
+    }
+
+    private var annotationLabel: String {
+        switch annotation.type {
+        case .aiStructure(_, let label, _): return label
+        case .aiFinding(_, _, let severity): return severity.capitalized
+        case .aiROILabel(_, let label, _, _): return label
+        default: return ""
+        }
+    }
+
+    private var annotationDetail: String {
+        switch annotation.type {
+        case .aiStructure: return ""
+        case .aiFinding(_, let description, _): return description
+        case .aiROILabel(_, _, let description, _): return description
+        default: return ""
+        }
+    }
+
+    private var confidenceText: String {
+        switch annotation.type {
+        case .aiStructure(_, _, let confidence): return "\(Int(confidence * 100))%"
+        case .aiROILabel(_, _, _, let confidence): return "\(Int(confidence * 100))%"
+        default: return ""
+        }
+    }
+}
+
 // MARK: - Annotation Overlay
 
 struct AnnotationOverlay: View {
@@ -2137,6 +2724,152 @@ struct AnnotationOverlay: View {
                 .cornerRadius(3)
                 .position(x: screenRect.midX, y: screenRect.maxY + 30)
             }
+
+        // MARK: AI Annotation Types
+
+        case .aiStructure(let rect, let label, let confidence):
+            if panel.showAIAnnotations {
+                let sr = aiScreenRect(rect, viewSize: viewSize)
+                let isSelected = panel.selectedAnnotationID == annotation.id
+                ZStack {
+                    if isSelected {
+                        Rectangle()
+                            .fill(Color.yellow.opacity(0.15))
+                            .frame(width: sr.width, height: sr.height)
+                            .position(x: sr.midX, y: sr.midY)
+                    }
+                    Rectangle()
+                        .stroke(Color.yellow, style: StrokeStyle(lineWidth: isSelected ? 2.5 : 1.5, dash: [6, 3]))
+                        .frame(width: sr.width, height: sr.height)
+                        .position(x: sr.midX, y: sr.midY)
+
+                    HStack(spacing: 3) {
+                        Text("AI")
+                            .font(.system(.caption2, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(Color.yellow)
+                            .cornerRadius(2)
+                        Text("\(label) (\(Int(confidence * 100))%)")
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.yellow)
+                    }
+                    .padding(2)
+                    .background(Color.black.opacity(0.7))
+                    .cornerRadius(3)
+                    .position(x: sr.midX, y: sr.minY - 12)
+                }
+            }
+
+        case .aiFinding(let rect, let description, let severity):
+            if panel.showAIAnnotations {
+                let sr = aiScreenRect(rect, viewSize: viewSize)
+                let severityColor = aiFindingSeverityColor(severity)
+                let isSelected = panel.selectedAnnotationID == annotation.id
+                ZStack {
+                    Rectangle()
+                        .fill(severityColor.opacity(isSelected ? 0.3 : 0.15))
+                        .frame(width: sr.width, height: sr.height)
+                        .position(x: sr.midX, y: sr.midY)
+                    Rectangle()
+                        .stroke(severityColor, lineWidth: isSelected ? 3 : 2)
+                        .frame(width: sr.width, height: sr.height)
+                        .position(x: sr.midX, y: sr.midY)
+
+                    HStack(spacing: 3) {
+                        Text("AI")
+                            .font(.system(.caption2, weight: .bold))
+                            .foregroundStyle(.black)
+                            .padding(.horizontal, 3)
+                            .padding(.vertical, 1)
+                            .background(severityColor)
+                            .cornerRadius(2)
+                        Text(severity.uppercased())
+                            .font(.system(.caption2, weight: .bold))
+                            .foregroundStyle(severityColor)
+                        Text(description)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                    }
+                    .padding(3)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(3)
+                    .position(x: sr.midX, y: sr.maxY + 14)
+                }
+            }
+
+        case .aiROILabel(let rect, let label, let description, let confidence):
+            if panel.showAIAnnotations {
+                let sr = aiScreenRect(rect, viewSize: viewSize)
+                let isSelected = panel.selectedAnnotationID == annotation.id
+                ZStack {
+                    if isSelected {
+                        Rectangle()
+                            .fill(Color.blue.opacity(0.15))
+                            .frame(width: sr.width, height: sr.height)
+                            .position(x: sr.midX, y: sr.midY)
+                    }
+                    Rectangle()
+                        .stroke(Color.blue, style: StrokeStyle(lineWidth: isSelected ? 2.5 : 1.5, dash: [4, 3]))
+                        .frame(width: sr.width, height: sr.height)
+                        .position(x: sr.midX, y: sr.midY)
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(spacing: 3) {
+                            Text("AI")
+                                .font(.system(.caption2, weight: .bold))
+                                .foregroundStyle(.black)
+                                .padding(.horizontal, 3)
+                                .padding(.vertical, 1)
+                                .background(Color.blue)
+                                .cornerRadius(2)
+                            Text("\(label) (\(Int(confidence * 100))%)")
+                                .font(.system(.caption2, weight: .semibold))
+                                .foregroundStyle(.blue)
+                        }
+                        Text(description)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundStyle(.white)
+                            .lineLimit(2)
+                    }
+                    .padding(3)
+                    .background(Color.black.opacity(0.8))
+                    .cornerRadius(3)
+                    .position(x: sr.midX, y: sr.maxY + 22)
+                }
+            }
+        }
+    }
+
+    /// Convert a normalized (0-1) AI bounding box rect to screen coordinates
+    private func aiScreenRect(_ rect: CGRect, viewSize: CGSize) -> CGRect {
+        let imgW = max(1, panel.displayImageWidth)
+        let imgH = max(1, panel.displayImageHeight)
+        let topLeft = pixelToScreen(
+            CGPoint(x: rect.origin.x * imgW, y: rect.origin.y * imgH),
+            viewSize: viewSize
+        )
+        let bottomRight = pixelToScreen(
+            CGPoint(x: (rect.origin.x + rect.width) * imgW,
+                    y: (rect.origin.y + rect.height) * imgH),
+            viewSize: viewSize
+        )
+        return CGRect(
+            x: min(topLeft.x, bottomRight.x),
+            y: min(topLeft.y, bottomRight.y),
+            width: abs(bottomRight.x - topLeft.x),
+            height: abs(bottomRight.y - topLeft.y)
+        )
+    }
+
+    private func aiFindingSeverityColor(_ severity: String) -> Color {
+        switch severity.lowercased() {
+        case "severe": return .red
+        case "moderate": return .orange
+        case "mild": return .yellow
+        default: return .green
         }
     }
 
@@ -2188,10 +2921,11 @@ struct AnnotationOverlay: View {
 
 struct ToolPalette: View {
     @ObservedObject var model: DICOMModel
+    @ObservedObject private var aiService = AIService.shared
 
     var body: some View {
         VStack(spacing: 2) {
-            ForEach(ActiveTool.allCases) { tool in
+            ForEach(ActiveTool.allCases.filter { $0 != .aiAnalyze }) { tool in
                 Button(action: { model.activeTool = tool }) {
                     Image(systemName: tool.icon)
                         .font(.system(size: 14))
