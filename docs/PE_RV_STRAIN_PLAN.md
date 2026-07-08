@@ -11,6 +11,29 @@
 
 ---
 
+## 📌 현재 상태 (2026-07-08 기준)
+
+| Phase | 상태 |
+|---|---|
+| **Phase 0** 베이스 병합 (SEG 렌더링 확보) | ✅ 완료 |
+| **Phase 1** seg-engine (RV/LV, one-shot) | ✅ 완료 — 코드 + 실데이터 파이프라인 검증 ([실험 기록](./0708-phase1-validation-experiment.md)) |
+| **Phase 1.5** 임상 정확도 (실제 PE/CTPA) | ⏳ 대기 — 실제 PE 데이터 필요 |
+| **Phase 2** 플러그인 스토어 (Swift) | ⬜ 미착수 |
+| **Phase 3** 임상 표시 (SEG 오버레이 + RV/LV 패널) | ⬜ 미착수 |
+| **Phase 4** 유저 스터디 패키징 | ⬜ 미착수 |
+
+**다음 할 일 (택1):**
+- [ ] **(A)** Phase 2 착수 — `EngineManager` 일반화 + `plugins.json` + `PluginStoreView`(라이선스 입력 UI)
+- [ ] **(B)** Phase 1.5 — 공개 PE-CTPA 셋(FUMPE / RSNA-STR-PE)으로 임상 정확도 검증
+- [ ] (마무리) 앱 GUI에서 `/tmp/ctpe_test/dicom` 열어 RV/LV SEG 오버레이 육안 확인
+
+**검증 완료 핵심 사실:**
+- `run_segment.py` → binary DICOM SEG → 뷰어 파서 roundtrip 실데이터 확인 (RV/LV 1.12, 72,831픽셀 일치)
+- nnU-Net은 MPS 미사용 CPU ~2–3분/케이스 → 스터디는 오프라인 사전계산
+- `heartchambers_highres`는 무료 학술 라이선스 필수 → Phase 2 스토어에 라이선스 입력 단계 필요
+
+---
+
 ## Phase 0 — 베이스 병합 (SEG 렌더링 확보) ✅ 완료
 
 포크는 오래된 upstream에서 분기되어 `DICOMDerivedObject`/`DICOMAnnotationObject`(binary SEG 렌더링) 등
