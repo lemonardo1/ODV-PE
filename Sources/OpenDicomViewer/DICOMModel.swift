@@ -4475,6 +4475,18 @@ class DICOMModel: ObservableObject {
 
     private let aiService = AIService.shared
 
+    /// Toggle the AI inspector sidebar. When opening, show AI annotations on the
+    /// active panel and kick off a first analysis if none has run yet.
+    /// Shared by the "G" keyboard shortcut across all key handlers.
+    func toggleAIInspector() {
+        showAIInspector.toggle()
+        guard showAIInspector, let panel = activePanel else { return }
+        panel.showAIAnnotations = true
+        if panel.aiDescription == nil && !panel.aiAnalysisInProgress {
+            triggerAIAnalysis(for: panel)
+        }
+    }
+
     /// Trigger AI analysis for the active panel's current image
     func triggerAIAnalysis(for panel: PanelState) {
         guard let image = panel.image else { return }

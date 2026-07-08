@@ -11,37 +11,38 @@
 
 ---
 
-## Phase 0 — 베이스 병합 (SEG 렌더링 확보)
+## Phase 0 — 베이스 병합 (SEG 렌더링 확보) ✅ 완료
 
 포크는 오래된 upstream에서 분기되어 `DICOMDerivedObject`/`DICOMAnnotationObject`(binary SEG 렌더링) 등
 이후 커밋이 빠져 있음. 최신 upstream 위에 AI 레이어를 재이식한다.
+→ 실제로는 공통 조상(`461336a`) 기반 **3-way git 머지**로 두 히스토리를 보존하며 병합했다.
 
 ### 0.1 준비
-- [ ] 최신 upstream(`jnheo-md/open-dicom-viewer`)을 새 브랜치로 클론/체크아웃
-- [ ] 현재 ODV-Annotate의 AI 레이어 커밋 범위 식별 (`git log`로 fork 분기점 확인)
-- [ ] `swift build` / `swift test`가 upstream 단독으로 통과하는지 확인 (기준선)
+- [x] 최신 upstream(`jnheo-md/open-dicom-viewer`)을 베이스로 새 레포 `ODV-PE` 생성
+- [x] ODV-Annotate 전체 히스토리 클론, fork 분기점(`461336a`) 확인
+- [x] 병합 전 upstream 기준선 확인
 
-### 0.2 AI 레이어(신규 파일) 이식
-- [ ] `Sources/OpenDicomViewer/AIService.swift` 복사
-- [ ] `Sources/OpenDicomViewer/AIServerManager.swift` 복사
-- [ ] `mlx-server/` 전체 복사 (`server.py`, `launch.sh`, `requirements.txt`, `README.md`)
-- [ ] 번들 파이썬 관련 `scripts/package_app.sh` 변경분 이식 (Python 3.11 번들, notarize)
-- [ ] `scripts/OpenDicomViewer.entitlements` 교체 (sandbox off, unsigned-exec, disable-library-validation, network client)
+### 0.2 AI 레이어 이식 (머지로 자동 반영)
+- [x] `AIService.swift` / `AIServerManager.swift` (신규 파일, 클린 머지)
+- [x] `mlx-server/` 전체 (신규, 클린 머지)
+- [x] `scripts/package_app.sh` — 번들 Python 3.11 + notarize (버전 2.0.0/build1로 통합)
+- [x] `scripts/OpenDicomViewer.entitlements` — sandbox off, unsigned-exec, disable-library-validation, network client
 
-### 0.3 공유 파일 접점 재적용
-- [ ] `App.swift` — `AI` CommandMenu + `checkExistingServer()` onAppear 훅
-- [ ] `DICOMModel.swift` — `triggerAIAnalysis` / `triggerAIAbnormalityDetection`
-- [ ] `PanelState.swift` — `aiAnnotations`, `showAIAnnotations`
-- [ ] `MultiPanelContainer.swift` — 바운딩박스 오버레이 UI
-- [ ] `ContentView.swift` — AI 인스펙터 사이드바 + `activeTool = .aiAnalyze`
-- [ ] `Tools` 메뉴 — AI Analyze(G) 항목
+### 0.3 공유 파일 충돌 해소 (5개 파일)
+- [x] `PanelState.swift` — Cine/멀티프레임 상태 + AI 상태 둘 다 유지
+- [x] `DICOMModel.swift` — Cine 메서드 + AI 분석 메서드 둘 다 유지
+- [x] `ContentView.swift` — upstream 키 라우팅 채택 + 인스펙터를 `activeInspector` switch로 병합(`.tags`에 파생객체 로직 통합)
+- [x] `MultiPanelContainer.swift` — `ImportedDICOMOverlay`(SEG) + `AIInspectorView` 둘 다 유지
+- [x] `App.swift` — AI 메뉴 + `checkExistingServer()` (클린 머지)
+- [x] "g" 단축키(AI 인스펙터 토글)를 3개 keyDown 핸들러에 배선 (`DICOMModel.toggleAIInspector()` 헬퍼)
 
 ### 0.4 검증 (Phase 0 완료 기준)
-- [ ] `swift build` 성공
-- [ ] `swift test` 통과
-- [ ] upstream의 SEG 렌더러 확인: **테스트용 binary DICOM SEG 파일을 시리즈 폴더에 넣고 오버레이가 뜨는지** 확인 ← Phase 1~3의 결과 표시 전제
-- [ ] 기존 Gemma AI 분석(bbox)이 병합 후에도 동작
-- [ ] 결과를 `master`(또는 통합 브랜치)에 병합
+- [x] `swift build` 성공
+- [x] `swift test` 통과 (67 XCTest + 21 swift-testing; `ActiveTool` 카운트 9→10 수정)
+- [x] SEG 렌더러 자동 검증: 실제 binary SEG 픽스처(`highdicom_SEG/seg_image_ct_binary.dcm`) 파싱 → 16×16 마스크·127픽셀 → `ImportedDICOMOverlay`의 `.mask` 렌더 케이스까지 경로 확인 (`testPublicHighdicomSEGFixtureParsesBinaryMasks`)
+- [x] 기존 Gemma AI 분석(bbox) 컴파일/경로 유지
+- [x] `main` 브랜치로 병합·푸시 (`lemonardo1/ODV-PE`)
+- [ ] ⚠️ 최종 픽셀 육안 확인은 GUI 실행 필요(사용자가 실제 SEG를 열어 확인) — 자동 검증 범위 밖
 
 ---
 

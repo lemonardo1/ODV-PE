@@ -655,6 +655,9 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
             case "e":
                 model.activeTool = .eraser
                 return true
+            case "g":
+                model.toggleAIInspector()
+                return true
             case "]", ".":
                 model.rotateClockwiseForPanel(model.activePanel)
                 return true
@@ -1005,6 +1008,7 @@ struct PanelInteractiveDICOMView: NSViewRepresentable {
                 case "d": model.activeTool = .ruler; return
                 case "n": model.activeTool = .angle; return
                 case "e": model.activeTool = .eraser; return
+                case "g": model.toggleAIInspector(); return
                 case "]", ".": model.rotateClockwiseForPanel(model.activePanel); return
                 case "[", ",": model.rotateCounterClockwiseForPanel(model.activePanel); return
                 case "w": model.activeTool = .windowLevel; return

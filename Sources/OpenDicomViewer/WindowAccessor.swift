@@ -51,6 +51,7 @@ private class KeyInterceptorView: NSView {
         case "d": model.activeTool = .ruler; return true
         case "n": model.activeTool = .angle; return true
         case "e": model.activeTool = .eraser; return true
+        case "g": model.toggleAIInspector(); return true
         case "]", ".": model.rotateClockwiseForPanel(model.activePanel); return true
         case "[", ",": model.rotateCounterClockwiseForPanel(model.activePanel); return true
         case "w": model.activeTool = .windowLevel; return true
