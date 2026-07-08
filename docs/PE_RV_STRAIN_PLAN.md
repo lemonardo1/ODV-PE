@@ -51,26 +51,27 @@
 상주 서버 아님. Swift가 파이썬 스크립트를 one-shot으로 스폰 (기존 `runSetupProcess` 패턴 재사용).
 → Gemma 상주 + seg 동시 상주로 인한 16GB RAM 초과 회피.
 
-### 1.1 파이썬 환경 스캐폴딩 `seg-engine/`
-- [ ] `seg-engine/requirements.txt` 작성 (`torch`, `TotalSegmentator`, `nibabel`, `pydicom`, `highdicom` 등)
-- [ ] `seg-engine/download_task.py` — `totalseg_download_weights -t <task>` 래핑, 진행률 stdout 스트리밍
-- [ ] `seg-engine/run_segment.py` — 핵심 실행기 (아래 사양)
+### 1.1 파이썬 환경 스캐폴딩 `seg-engine/` ✅
+- [x] `seg-engine/requirements.txt` (torch, TotalSegmentator, nibabel, SimpleITK, pydicom, highdicom, numpy)
+- [x] `seg-engine/download_task.py` — 태스크별 가중치 다운로드, `--list`, 진행률 stdout
+- [x] `seg-engine/run_segment.py` — 핵심 실행기 (아래 사양)
+- [x] `seg-engine/rvlv.py` — 순수 NumPy 계산 모듈 (heavy dep 분리 → 단위 테스트 가능)
+- [x] `seg-engine/tests/test_rvlv.py` — NumPy-only 테스트 **8/8 통과**
 
-### 1.2 `run_segment.py` 사양
-- [ ] 입력 인자: `--series <DICOM 폴더>` `--task heartchambers_highres` `--out <dir>` `--method length|volume`
-- [ ] (1) DICOM 시리즈 로드 → TotalSegmentator 실행 → NIfTI 마스크
-- [ ] (2) RV/LV ratio 계산
-  - [ ] **length 방식(기본)**: 축상 최대 단면에서 RV/LV 최소축 직경비
-  - [ ] volume 방식(옵션): 챔버 voxel 볼륨비
-- [ ] (3) 룰 분류 + 가이드라인 권고문 생성 (threshold 설정 가능, 기본 ≥ 1.0)
-- [ ] (4) **binary DICOM SEG 내보내기** — 소스 SOP Instance 참조 포함 (upstream 렌더러가 읽을 수 있는 native binary 포맷)
-- [ ] 출력: `<out>/segmentation.dcm` + `<out>/metrics.json`
-  - `metrics.json` = `{ rv_lv_ratio, method, threshold, classification, recommendation, task, weights_version, source_series_uid }`
-- [ ] 전송은 **경로 기반**(base64 아님) — 환자 데이터가 머신 밖으로 안 나감
+### 1.2 `run_segment.py` 사양 ✅ (코드 완료)
+- [x] 입력 인자: `--series` `--task` `--out` `--method length|volume` `--threshold` `--no-seg` `--fast`
+- [x] (1) TotalSegmentator 실행 → NIfTI 마스크 (heavy dep은 지연 import)
+- [x] (2) RV/LV ratio 계산 — length(축상 PCA 최소축 직경비, 기본) / volume(voxel 볼륨비)
+- [x] (3) 룰 분류 + 가이드라인 권고문 (threshold 설정 가능, 기본 ≥ 1.0)
+- [x] (4) binary DICOM SEG 내보내기 (highdicom, 소스 SOP 참조; RV=seg1, LV=seg2)
+- [x] 출력 `<out>/metrics.json` (+ `segmentation.dcm`), 경로 기반 전송, graceful error → metrics.json `error` 필드
+- [x] CLI 스모크: `--help`/`--list`/잘못된 경로 처리 확인 (heavy dep 없이)
 
-### 1.3 검증 (Phase 1 완료 기준)
-- [ ] CLI로 케이스 1개 실행 → `segmentation.dcm` + `metrics.json` 정상 산출
-- [ ] SEG 파일을 Phase 0 뷰어에 로드 → RV/LV 마스크 오버레이 확인
+### 1.3 검증 (Phase 1.5로 이관 — 사용자 환경 필요)
+> `rvlv.py` 핵심 로직은 검증됨. 전체 파이프라인 실행은 torch+TotalSegmentator(~3GB) 설치 + CT 데이터가 필요해 이 세션에서 불가.
+- [ ] (사용자 환경) `pip install -r seg-engine/requirements.txt` + `download_task.py --task heartchambers_highres`
+- [ ] (사용자 환경) CLI로 케이스 1개 실행 → `segmentation.dcm` + `metrics.json` 산출
+- [ ] (사용자 환경) SEG 파일을 뷰어에 로드 → RV/LV 마스크 오버레이 육안 확인
 - [ ] length vs volume 결과 비교 (수 케이스)
 
 ---

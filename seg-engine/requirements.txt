@@ -1,0 +1,16 @@
+# Segmentation engine — TotalSegmentator (PyTorch / nnU-Net) on Apple Silicon.
+# Installed into a dedicated venv, isolated from the MLX engine (torch vs mlx).
+# Heavy (~2-3 GB with torch); weights are downloaded per-task on demand.
+
+# Core segmentation
+TotalSegmentator>=2.4.0
+torch>=2.2.0
+
+# DICOM / NIfTI I/O + SEG export
+nibabel>=5.0.0
+SimpleITK>=2.3.0
+pydicom>=2.4.0
+highdicom>=0.22.0
+
+# Numerics (also used by the pure rvlv.py metric module)
+numpy>=1.24.0
