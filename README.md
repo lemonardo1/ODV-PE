@@ -282,6 +282,7 @@ Sources/
 ## Acknowledgments
 
 This project is built on top of [OpenDicomViewer](https://github.com/jnheo-md/open-dicom-viewer) by [JoonNyung Heo, MD, PhD](https://jnheo.tistory.com/). The original viewer provides the foundation — fast DICOM parsing, multi-panel layouts, MPR, measurement tools, and more. AI annotation layer developed by [Daeseong Kim, MD](https://www.lemonaa.com/cv).
+Additional contributor: [Kunhee Kim](https://github.com/Kunhee-Kim).
 
 ## License
 
